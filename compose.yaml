@@ -1,0 +1,97 @@
+x-application: &application
+  build:
+    context: .
+    target: production
+  image: nebus-payments:local
+  env_file: .env
+  environment: &application-env
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 45s
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  postgres:
+    image: postgres:16.10-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Задайте POSTGRES_DB в .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Задайте POSTGRES_USER в .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1.4-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Задайте RABBITMQ_USER в .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Задайте RABBITMQ_PASSWORD в .env}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *application
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck", "api"]
+      interval: 10s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
+
+  consumer:
+    <<: *application
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck", "worker"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  webhook:
+    <<: *application
+    profiles: ["demo"]
+    command: ["python", "-m", "uvicorn", "scripts.webhook_receiver:create_app", "--factory", "--host", "0.0.0.0", "--port", "8081", "--no-access-log"]
+    ports:
+      - "127.0.0.1:8081:8081"
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
