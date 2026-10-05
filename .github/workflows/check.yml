@@ -1,0 +1,61 @@
+name: checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.18"
+          python-version: "3.13"
+          enable-cache: false
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run lint-imports
+      - run: uv run pytest tests/unit --junitxml=unit.xml
+        env:
+          TEST: "1"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-results
+          path: unit.xml
+
+  integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -p nebus-tests -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
+      - run: docker compose -p nebus-tests -f compose.test.yaml logs --no-color > integration.log
+        if: always()
+      - run: docker compose -p nebus-tests -f compose.test.yaml down -v
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-log
+          path: integration.log
+
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose --profile demo up -d --wait --build
+      - run: docker compose exec -T api python -m scripts.smoke --api http://api:8000 --receiver http://webhook:8081
+      - run: docker compose --profile demo logs --no-color > smoke.log
+        if: always()
+      - run: docker compose --profile demo down -v
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-log
+          path: smoke.log
