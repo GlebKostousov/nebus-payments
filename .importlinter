@@ -1,0 +1,50 @@
+[importlinter]
+root_package = app
+
+[importlinter:contract:core]
+name = Core does not depend on application layers
+type = forbidden
+source_modules = app.core
+forbidden_modules =
+    app.entities
+    app.workflows
+    app.gateways
+    app.web
+    app.workers
+
+[importlinter:contract:entities]
+name = Persistence does not call workflows or transports
+type = forbidden
+source_modules = app.entities
+forbidden_modules =
+    app.workflows
+    app.gateways
+    app.web
+    app.workers
+
+[importlinter:contract:workflow]
+name = Workflows do not import transport implementations
+type = forbidden
+source_modules = app.workflows
+forbidden_modules =
+    app.gateways
+    app.web
+    app.workers
+
+[importlinter:contract:gateways]
+name = Gateways do not orchestrate application state
+type = forbidden
+source_modules = app.gateways
+forbidden_modules =
+    app.entities
+    app.workflows
+    app.web
+    app.workers
+
+[importlinter:contract:processor]
+name = Payment processor is independent of SQLAlchemy and FastStream
+type = forbidden
+source_modules = app.workflows.payments._process
+forbidden_modules =
+    app.core.db
+    app.entities
